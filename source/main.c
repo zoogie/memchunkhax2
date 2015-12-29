@@ -15,7 +15,7 @@ typedef struct {
 extern u32 __ctru_heap;
 extern u32 __ctru_heap_size;
 
-static Result control_res = -1;
+static volatile Result control_res = -1;
 
 // Thread function to slow down svcControlMemory execution.
 void delay_thread(void* arg) {
