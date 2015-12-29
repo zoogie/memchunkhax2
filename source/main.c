@@ -6,6 +6,12 @@
 #define SLAB_HEAP 0xFFF70000
 #define PAGE_SIZE 0x1000
 
+typedef struct {
+    u32 size;
+    void* next;
+    void* prev;
+} MemChunkHdr;
+
 extern u32 __ctru_heap;
 extern u32 __ctru_heap_size;
 
@@ -73,17 +79,15 @@ void do_hax() {
     map_raw_pages(memAddr, memSize);
 
     // Retrieve the current header data.
-    u32 size = *(vu32*) (memAddr);
-    u32 next = *(vu32*) (memAddr + 4);
-    u32 prev = *(vu32*) (memAddr + 8);
+    MemChunkHdr hdr = *(volatile MemChunkHdr*) memAddr;
 
     // Overwrite the header "next" pointer.
     *(u32*) (memAddr + 4) = SLAB_HEAP; // TODO: destination
 
     // Output debug information.
-    printf("\"Size\" value: %08X\n", (int) size);
-    printf("\"Next\" value: %08X\n", (int) next);
-    printf("\"Prev\" value: %08X\n", (int) prev);
+    printf("\"Size\" value: %08X\n", (int) hdr.size);
+    printf("\"Next\" value: %08X\n", (int) hdr.next);
+    printf("\"Prev\" value: %08X\n", (int) hdr.prev);
     printf("Post-overwrite control result: %08X\n", (int) control_res);
 
     wait_map_complete();
