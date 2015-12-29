@@ -71,6 +71,11 @@ void wait_map_complete() {
 
 // Executes exploit.
 void do_hax() {
+    // Allow threads on core 1.
+    aptOpenSession();
+    APT_SetAppCpuTimeLimit(30);
+    aptCloseSession();
+
     // Prepare necessary info.
     u32 memAddr = __ctru_heap + __ctru_heap_size;
     u32 memSize = PAGE_SIZE * 2;
@@ -102,11 +107,6 @@ void do_hax() {
 int main(int argc, char **argv) {
     gfxInitDefault();
     consoleInit(GFX_TOP, NULL);
-
-    // Allow threads on core 1.
-    aptOpenSession();
-    APT_SetAppCpuTimeLimit(30);
-    aptCloseSession();
 
     do_hax();
 
