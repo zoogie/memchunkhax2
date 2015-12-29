@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-#define SLAB_HEAP 0xFFF00000
+#define SLAB_HEAP 0xFFF70000
 #define PAGE_SIZE 0x1000
 
 extern u32 __ctru_heap;
