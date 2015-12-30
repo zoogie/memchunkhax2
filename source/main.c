@@ -172,7 +172,7 @@ void do_hax() {
     printf("Timer address: 0x%08X\n", (int) timerAddr);
 
     // Debug output.
-    printf("Mapping pages...\n");
+    printf("Mapping pages for overwrite...\n");
 
     // Map the pages.
     map_raw_pages(memAddr, memSize);
