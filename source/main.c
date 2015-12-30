@@ -167,7 +167,7 @@ void do_hax() {
 
     // Overwrite the timer's vtable with our own.
     // TODO: This needs to be a kernel virtual address.
-    void*** vtablePtr = (void***) (memAddr + ((u32) timerObj - ((u32) timerObj & ~0xFFF)));
+    void*** vtablePtr = (void***) (memAddr + PAGE_SIZE + ((u32) timerObj - ((u32) timerObj & ~0xFFF)));
     *vtablePtr = vtable;
 
     // Free the timer.
