@@ -113,7 +113,7 @@ static void wait_map_complete() {
     }
 }
 
-// Creates a timer and outputs its kernel object address from r2.
+// Creates a timer and outputs its kernel object address (at ref count, not vtable pointer) from r2.
 static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset_type, u32* kaddr) {
     asm volatile(
     "str r0, [sp, #-4]!\n"
