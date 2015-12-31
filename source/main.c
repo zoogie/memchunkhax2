@@ -162,9 +162,9 @@ void do_hax() {
     printf("Prev: %08X\n", (int) hdr.prev);
 
     // Create a timer, crafting a fake MemChunkHdr out of its data.
-    // Neither next nor prev matter as verification happens prior to the overwrite.
-    // Additionally, these values are not used other than next when traversing pages to map to userland.
-    // As the kernel page is the last to be mapped, this is irrelevant.
+    // Prev does not matter, as any verification happens prior to the overwrite.
+    // However, next must be 0, as it does not use size to check when allocation is finished.
+    // If next is not 0, it will continue to whatever is pointed to by it.
     Handle timer;
     u32 timerAddr;
     svcCreateTimerKAddr(&timer, 0, &timerAddr);
