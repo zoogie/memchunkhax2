@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <malloc.h>
+#include <string.h>
+#include <3ds/svc.h>
 
 #define PAGE_SIZE 0x1000
 
@@ -117,6 +119,9 @@ void do_hax() {
     u32 memAddr = __ctru_heap + __ctru_heap_size;
     u32 memSize = PAGE_SIZE * 2;
 
+    // Debug output.
+    printf("Memory address: 0x%08X\n", (int) memAddr);
+
     // Isolate a single page between others to ensure using the next chunk.
     svcControlMemory(&tmp, memAddr + memSize, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
     svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
@@ -126,6 +131,8 @@ void do_hax() {
     // Prev does not matter, as any verification happens prior to the overwrite.
     // However, next must be 0, as it does not use size to check when allocation is finished.
     // If next is not 0, it will continue to whatever is pointed to by it.
+    // Even if this eventually reaches an end, it will continue decrementing the remaining size value.
+    // This will roll over, and panic when it thinks that there is more memory to allocate than was available.
     Handle timer;
     u32 timerAddr;
     svcCreateTimerKAddr(&timer, 0, &timerAddr);
@@ -157,20 +164,22 @@ void do_hax() {
     //memcpy(backup, (void*) (memAddr + PAGE_SIZE), PAGE_SIZE);
 
     // Debug output.
-    //KTimer* mappedTimerObj = (KTimer*) (memAddr + PAGE_SIZE + ((u32) timerObj & 0xFFF));
-    //printf("VTable: %08X\n", (int) mappedTimerObj->vtable);
-
-    // Debug output.
     printf("Post-overwrite control result: 0x%08X\n", (int) control_res);
 
     // Wait for memory mapping to complete.
     wait_map_complete();
 
+    // Restore the kernel page backup.
+    //memcpy((void*) (memAddr + PAGE_SIZE), backup, PAGE_SIZE);
+
     // Debug output.
     printf("Final control result: 0x%08X\n", (int) control_res);
 
-    // Restore the kernel page backup.
-    //memcpy((void*) (memAddr + PAGE_SIZE), backup, PAGE_SIZE);
+    int val = *(int*) (memAddr + PAGE_SIZE);
+
+    // Debug output.
+    printf("Hello world!\n");
+    printf("Val: %08X\n", val);
 
     // Overwrite the timer's vtable with our own.
     // TODO: This needs to be a kernel virtual address.
