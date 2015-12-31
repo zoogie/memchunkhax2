@@ -79,7 +79,7 @@ static void wait_raw_mapped(u32 memAddr) {
     Handle arbiter = __sync_get_arbiter();
 
     // Use svcArbitrateAddress to detect when the memory page has been mapped.
-    while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN, 0, 0) == 0xD9001814);
+    while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN_TIMEOUT, 0, 0) == 0xD9001814);
 }
 
 // Waits for the memory mapping thread to complete.
