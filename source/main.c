@@ -34,31 +34,6 @@ extern u32 __ctru_heap_size;
 
 static volatile Result control_res = -1;
 
-// Test function, please ignore.
-static void hello() {
-    printf("Hello world!\n");
-}
-
-// Test vtable, please ignore.
-static void* vtable[16] = {
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello,
-        hello
-};
-
 // Thread function to slow down svcControlMemory execution.
 static void delay_thread(void* arg) {
     // Slow down thread execution until the control operation has completed.
