@@ -7,7 +7,7 @@
 #define PAGE_SIZE 0x1000
 
 typedef struct __attribute__((packed)) {
-    void* vtable;
+    void** vtable;
     u32 refCount;
     u32 syncedThreads;
     void* firstThreadNode;
@@ -204,8 +204,8 @@ void do_hax() {
 
     // Overwrite the timer's vtable with our own.
     // TODO: This needs to be a kernel virtual address.
-    //void*** vtablePtr = (void***) (memAddr + PAGE_SIZE + ((u32) timerObj & 0xFFF));
-    //*vtablePtr = vtable;
+    //KTimer* mappedTimerObj = (KTimer*) (memAddr + PAGE_SIZE + ((u32) timerObj & 0xFFF));
+    //mappedTimerObj->vtable = vtable;
 
     // Free the timer.
     svcCloseHandle(timer);
