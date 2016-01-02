@@ -175,12 +175,12 @@ void execute_memchunkhax2() {
     // Back up the kernel page before it is cleared.
     memcpy(backup, (void*) (data->addr + PAGE_SIZE), PAGE_SIZE);
 
-    printf("Overwrite complete.\n");
-
     if(data->result != -1) {
         printf("Failed to perform overwrite on time.\n");
         goto cleanup;
     }
+
+    printf("Overwrite complete.\n");
 
     // Wait for memory mapping to complete.
     while(data->result == -1) {
