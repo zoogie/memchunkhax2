@@ -101,7 +101,7 @@ void execute_memchunkhax2() {
     data->result = -1;
 
     for(int i = 0; i < 16; i++) {
-        vtable[i] = kernel_entry; // TODO: Convert to kernel virtual address.
+        vtable[i] = kernel_entry;
     }
 
     aptOpenSession();
