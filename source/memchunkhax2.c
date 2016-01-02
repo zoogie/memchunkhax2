@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define SLAB_HEAP_VIRT 0xFFF70000 // 9.2
+#define SLAB_HEAP_PHYS 0x1FFA0000
+#define KERNEL_VIRT_TO_PHYS 0x40000000
+
 #define PAGE_SIZE 0x1000
 
 typedef struct {
@@ -108,6 +112,7 @@ void execute_memchunkhax2() {
 
     // Pull the kernel address of the created object from r2.
     asm("mov %0, r2" : "=r"(kObjAddr));
+    kObjAddr = kObjAddr - SLAB_HEAP_VIRT + SLAB_HEAP_PHYS - KERNEL_VIRT_TO_PHYS;
 
     printf("Mapping pages for overwrite...\n");
 
