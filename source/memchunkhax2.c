@@ -6,7 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SLAB_HEAP_VIRT 0xFFF70000 // 9.2
+#define SLAB_HEAP_VIRT 0xFFF70000 // O3DS 9.0+, N3DS All
+
 #define SLAB_HEAP_PHYS 0x1FFA0000
 #define KERNEL_VIRT_TO_PHYS 0x40000000
 
