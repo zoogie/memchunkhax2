@@ -136,7 +136,7 @@ void execute_memchunkhax2() {
     // If next is not 0, it will continue to whatever is pointed to by it.
     // Even if this eventually reaches an end, it will continue decrementing the remaining size value.
     // This will roll over, and panic when it thinks that there is more memory to allocate than was available.
-    while((kObjAddr & 0xFFFF) != 0x3010) {
+    while(kObjAddr != SLAB_HEAP_VIRT + 0x3010) {
         if(handlesCreated >= 32 || R_FAILED(svcCreateMutexKAddr(&handles[handlesCreated], 0, &kObjAddr))) {
             printf("Failed to create KSynchronizationObject.\n");
             goto cleanup;
