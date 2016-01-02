@@ -187,6 +187,11 @@ void execute_memchunkhax2() {
         svcSleepThread(10000);
     }
 
+    if(R_FAILED(data->result)) {
+        printf("Failed to map memory.\n");
+        goto cleanup;
+    }
+
     printf("Map complete.\n");
 
     // Restore the kernel page backup.
@@ -198,11 +203,6 @@ void execute_memchunkhax2() {
     /* for(int i = 0; i < PAGE_SIZE; i += 4) {
         *(u32*) (data->addr + PAGE_SIZE + i) = (u32) osConvertVirtToPhys(vtable) - KERNEL_VIRT_TO_PHYS;
     } */
-
-    if(R_FAILED(data->result)) {
-        printf("Failed to map memory.\n");
-        goto cleanup;
-    }
 
 cleanup:
     printf("Cleaning up...\n");
