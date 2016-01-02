@@ -66,7 +66,6 @@ static Result __attribute__((naked)) svcCreateTimerKAddr(Handle* timer, u8 reset
     );
 }
 
-
 // Executes exploit.
 void execute_memchunkhax2() {
     printf("Setting up...\n");
@@ -231,6 +230,10 @@ cleanup:
 
     if(kObjHandle != 0) {
         svcCloseHandle(kObjHandle);
+    }
+
+    if(vtable != NULL) {
+        linearFree(vtable);
     }
 
     printf("Test value: %08X\n", (int) testVal);
