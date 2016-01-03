@@ -79,7 +79,6 @@ static void km_stage1() {
     sprintf(DEBUGBUF_NEXT, "proc at %p\n", proc);
     u8 *procacl = proc + OLDNEW(KPROCESS_ACL_START);
     memset(procacl, 0xFF, SVC_ACL_SIZE);
-    sprintf(DEBUGBUF_NEXT, "proc svc acl overwritten\n");
 
     // Now patch the current thread.
     u8 *thread = (u8*)CURRENT_KTHREAD;
@@ -102,7 +101,6 @@ static s32 kmbackdoor_pid_zero(void) {
     originalPid = km_get_process_pid();
     sprintf(DEBUGBUF_NEXT, "old pid is %lu\n", originalPid);
     km_patch_process_pid(0);
-    sprintf(DEBUGBUF_NEXT, "patched pid is %lu\n", km_get_process_pid());
     
     // We're now PID zero, all we have to do is reinitialize the service manager in user-mode.
     return 0;
@@ -112,9 +110,7 @@ static s32 kmbackdoor_pid_zero(void) {
 static s32 kmbackdoor_pid_reset(void) {
     __asm__ volatile("cpsid aif");
     
-    sprintf(DEBUGBUF_NEXT, "old pid is %lu\n", km_get_process_pid());
     km_patch_process_pid(originalPid);
-    sprintf(DEBUGBUF_NEXT, "patched pid is %lu\n", km_get_process_pid());
 
     // Back to normal.
     return 0;
@@ -154,7 +150,7 @@ static Result __attribute__((naked)) svcCreateEventKAddr(Handle* event, u8 reset
 
 // Executes exploit.
 static u8 memchunkhax2_exploit() {
-    printf("Setting up...\n");
+    printf("Setting up firm=%ld kernel=%ld\n", osGetFirmVersion(), osGetKernelVersion());
     
     // Set up variables.
     Handle arbiter = __sync_get_arbiter();
@@ -343,7 +339,6 @@ static u8 memchunkhax2_service_unlock() {
     printf("Reinitializing srv\n");
     srvExit();
     srvInit();
-    printf("srv reinitialized.\n");
 
     svcBackdoor(kmbackdoor_pid_reset);
     debugbuf_out();

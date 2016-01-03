@@ -14,7 +14,10 @@ int main(int argc, char **argv) {
 
     // This one should fail
     res = srvGetServiceHandleDirect(&amHandle, "am:u");
-    printf("am:u init1 result/handle: %lu, %lu\n", res, amHandle);
+    printf("am:u init1 result/handle: res=%lu handle=%lu\n", res, amHandle);
+    if(amHandle) {
+        svcCloseHandle(amHandle);
+    }
 
     // Run the exploit
     success = execute_memchunkhax2();
@@ -22,7 +25,10 @@ int main(int argc, char **argv) {
 
     // This one hopefully won't
     res = srvGetServiceHandleDirect(&amHandle, "am:u");
-    printf("am:u init2 result/handle: %lu, %lu\n", res, amHandle);
+    printf("am:u init2 result/handle: res=%lu handle=%lu\n", res, amHandle);
+    if(amHandle) {
+        svcCloseHandle(amHandle);
+    }
 
     printf("Press START to exit.\n");
 
